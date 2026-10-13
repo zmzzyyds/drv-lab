@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: lint, unit tests, and a real install
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately not editable: the last step imports the installed package,
+      # and an editable install would just point back at the checkout.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Ruff
+        run: ruff check src tests tools
+
+      - name: Unit tests
+        # cpio is only used by the initramfs packing test, which skips without it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cpio
+          pytest -v
+
+      - name: The install carries the files it reads at runtime
+        # Run from a scratch directory on purpose: from the checkout, `import
+        # drvlab` would find the source tree and the check would pass no matter
+        # what the packaging did.
+        run: |
+          cd "$(mktemp -d)"
+          python "$GITHUB_WORKSPACE/tools/check_installed_data.py"
