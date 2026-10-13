@@ -95,13 +95,21 @@ prints where the expensive things live.
 
 ## Status
 
-Working end to end for a platform driver on arm64, verified against a real guest:
+Working end to end on arm64, verified against a real guest:
 
 | | |
 |---|---|
 | Boot to guest poweroff | 2.9 s |
 | Whole run, kernel already built | ~19 s |
 | First run, including the kernel build | ~90 min on two cores |
+
+Against the three templates drvforge ships:
+
+| Template | Result |
+|---|---|
+| `misc` | runs, and reports exit 1 — its own test client seeks on a character device that cannot seek |
+| `platform-cdev` | runs, and passes |
+| `iio-temp` | will not build: the guest kernel has no IIO, so `devm_iio_device_alloc` is undefined. Testing it needs `CONFIG_IIO` and `i2c-stub` in the fragment |
 
 Not done yet, and it matters for judging the output:
 
@@ -113,8 +121,7 @@ Not done yet, and it matters for judging the output:
   therefore not caught, and a driver that reads properties from its node in
   `probe()` will find none. Closing this needs `CONFIG_OF_OVERLAY` and
   `of_overlay_fdt_apply()`.
-- Only the platform-driver shape is supported. An I2C client driver needs
-  `i2c-stub` and an IIO-enabled guest kernel; neither is wired up.
+- Only the platform-driver shape is supported; I2C client drivers are not.
 - arm64 only, one kernel version at a time, no machine-readable output, no
   GitHub Action yet.
 

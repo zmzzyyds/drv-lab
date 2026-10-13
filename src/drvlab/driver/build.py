@@ -14,6 +14,7 @@ failure that reads like a broken driver and is not one.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 from drvlab import external
@@ -60,18 +61,29 @@ def static_test_argv(
     out: Path | str,
     *,
     cross_compile: str = DEFAULT_CROSS_COMPILE,
+    include_dirs: Sequence[Path | str] = (),
 ) -> list[str]:
-    """Return the argv that builds the driver's userspace test client."""
-    return [
-        f"{cross_compile}gcc",
-        "-static",
-        "-Wall",
-        "-Wextra",
-        "-O2",
-        "-o",
-        str(out),
-        str(source),
-    ]
+    """Return the argv that builds the driver's userspace test client.
+
+    ``include_dirs`` matters for any driver that shares a UAPI header between
+    kernel and userspace: drvforge's cdev template has its test include
+    ``demo_cdev.h`` from the project's own ``include/``, and without the path
+    the test does not compile at all.
+    """
+    argv = [f"{cross_compile}gcc", "-static", "-Wall", "-Wextra", "-O2"]
+    for directory in include_dirs:
+        argv += ["-I", str(directory)]
+    return argv + ["-o", str(out), str(source)]
+
+
+def test_include_dirs(driver_dir: Path | str) -> list[Path]:
+    """Header directories the driver's test client needs, if any.
+
+    Only adds the directory when it exists, so the common case stays a plain
+    compile with no path of a directory that is not there.
+    """
+    include = Path(driver_dir) / "include"
+    return [include] if include.is_dir() else []
 
 
 def module_name_of(driver_dir: Path | str) -> str:
@@ -143,12 +155,14 @@ def build_static_test(
     out: Path,
     *,
     cross_compile: str = DEFAULT_CROSS_COMPILE,
+    include_dirs: Sequence[Path | str] = (),
     log_path: Path | None = None,
 ) -> Path:
     """Build the userspace test, statically, and return it."""
     out.parent.mkdir(parents=True, exist_ok=True)
     external.run_checked(
-        static_test_argv(source, out, cross_compile=cross_compile), log_path=log_path
+        static_test_argv(source, out, cross_compile=cross_compile, include_dirs=include_dirs),
+        log_path=log_path,
     )
     return out
 

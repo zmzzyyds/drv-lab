@@ -120,3 +120,41 @@ def test_the_injector_source_ships_with_the_package():
     text = source.read_text(encoding="utf-8")
     # It only works with the GPL-only symbol it calls.
     assert 'MODULE_LICENSE("GPL")' in text
+
+
+# --- shared UAPI headers ---------------------------------------------------
+#
+# drvforge's cdev template ships a header under include/ that both the driver and
+# its test client include. Without the path the test does not compile at all,
+# which took a real run to notice.
+
+
+def test_include_dirs_is_empty_without_an_include_directory(tmp_path):
+    assert driver_build.test_include_dirs(tmp_path) == []
+
+
+def test_include_dirs_finds_a_shared_header_directory(tmp_path):
+    (tmp_path / "include").mkdir()
+    assert driver_build.test_include_dirs(tmp_path) == [tmp_path / "include"]
+
+
+def test_test_argv_adds_the_include_path():
+    argv = static_test_argv("tools/test.c", "out", include_dirs=["/proj/include"])
+    assert argv[argv.index("-I") + 1] == "/proj/include"
+
+
+def test_test_argv_adds_one_include_path_per_directory():
+    argv = static_test_argv("t.c", "o", include_dirs=["/a", "/b"])
+    assert argv.count("-I") == 2
+
+
+def test_test_argv_is_unchanged_without_include_paths():
+    assert "-I" not in static_test_argv("t.c", "o")
+
+
+def test_include_paths_do_not_disturb_compiler_flags():
+    argv = static_test_argv("t.c", "o", include_dirs=["/a"])
+    assert argv[:2] == ["aarch64-linux-gnu-gcc", "-static"]
+    assert "-Wall" in argv
+    assert argv[-1] == "t.c"
+    assert argv[argv.index("-o") + 1] == "o"

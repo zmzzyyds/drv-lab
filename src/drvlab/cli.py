@@ -150,6 +150,7 @@ def _run(args: argparse.Namespace) -> int:
     test = driver_build.build_static_test(
         driver_build.test_client_source(driver_dir),
         run_dir / "test-client",
+        include_dirs=driver_build.test_include_dirs(driver_dir),
         log_path=run_dir / "test-build.log",
     )
     injector = driver_build.build_injector(
