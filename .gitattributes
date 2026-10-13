@@ -1,0 +1,8 @@
+# drv-lab runs on Linux and its artefacts are read there, so everything is LF.
+#
+# This is not cosmetic. The guest's /init is exec'd by the kernel directly: a
+# CRLF shebang makes it fail, and the failure reads like a missing initramfs
+# rather than a line-ending problem. With core.autocrlf=true, a Windows checkout
+# would produce exactly that. The same applies to the injector's C and to the
+# kernel config fragment, which is consumed by a parser that expects LF.
+* text=auto eol=lf

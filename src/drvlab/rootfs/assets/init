@@ -1,0 +1,118 @@
+#!/bin/sh
+#
+# drv-lab guest init.
+#
+# The kernel runs this as PID 1 because the command line carries rdinit=/init.
+# Being PID 1 matters: if this script returns, the kernel panics, so every path
+# out of here ends in poweroff.
+#
+# There is no udev in a busybox initramfs. Device nodes come from devtmpfs.
+#
+# Status is reported by writing into the 9p share, not by the exit status: QEMU
+# exits 0 whatever the guest did, so by the time the machine is gone the exit
+# status carries nothing.
+#
+# The host tells the guest what to do with files it drops into the share:
+#
+#   .drvlab/module   a module name to load, e.g. "demo_misc"
+#   .drvlab/test     a test binary inside the share to run afterwards
+#
+# With neither present, /init reports stage=booted and stops. That is the boot
+# smoke test.
+
+SHARE_TAG=hostshare
+SHARE_MNT=/mnt/host
+RESULT_DIR=$SHARE_MNT/.drvlab
+RESULT=$RESULT_DIR/result
+CONSOLE=/dev/console
+
+say() {
+	echo "drvlab: $*" >"$CONSOLE"
+}
+
+write_result() {
+	# write_result <stage> <message> [test-exit]
+	{
+		echo "stage=$1"
+		echo "message=$2"
+		[ -n "$3" ] && echo "test-exit=$3"
+	} >"$RESULT"
+}
+
+die() {
+	say "FATAL: $1"
+	[ -d "$RESULT_DIR" ] && write_result harness-error "$1"
+	poweroff -f
+}
+
+mkdir -p /proc /sys /dev /tmp
+mount -t proc     none /proc
+mount -t sysfs    none /sys
+mount -t devtmpfs none /dev
+
+mkdir -p "$SHARE_MNT"
+if ! mount -t 9p -o trans=virtio,version=9p2000.L "$SHARE_TAG" "$SHARE_MNT"; then
+	die "could not mount the 9p share '$SHARE_TAG'"
+fi
+mkdir -p "$RESULT_DIR"
+
+say "share mounted"
+
+if [ ! -f "$RESULT_DIR/module" ]; then
+	write_result booted "no module to load"
+	say "nothing to load, powering off"
+	poweroff -f
+fi
+
+MODULE=$(cat "$RESULT_DIR/module")
+
+# A platform driver that binds only through a device tree compatible cannot bind
+# here: this guest has no way to gain a node (see drvlab-injector.c). When the
+# injector is present, publish a device named after the driver first --
+# platform_match()'s last resort accepts that.
+if [ -f "$SHARE_MNT/drvlab-injector.ko" ]; then
+	say "publishing a platform device named $MODULE"
+	insmod "$SHARE_MNT/drvlab-injector.ko" "name=$MODULE" || die "injector insmod failed"
+fi
+
+say "loading $MODULE.ko"
+if ! insmod "$SHARE_MNT/$MODULE.ko"; then
+	die "insmod $MODULE.ko failed"
+fi
+
+# A device node should exist as soon as insmod returns: the driver's probe runs
+# synchronously inside it, and devtmpfs creates the node as the device is
+# registered. Wait anyway, so that a slow path shows up as a clean "no bind"
+# rather than a race.
+DEV=/dev/$MODULE
+n=0
+while [ ! -e "$DEV" ] && [ "$n" -lt 10 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+
+if [ ! -e "$DEV" ]; then
+	write_result no-bind "$MODULE loaded but $DEV never appeared"
+	say "$DEV never appeared"
+	poweroff -f
+fi
+say "$DEV appeared"
+
+TEST="$RESULT_DIR/test"
+if [ ! -f "$TEST" ]; then
+	write_result booted "$DEV appeared, no test to run"
+	say "no test to run, powering off"
+	poweroff -f
+fi
+
+say "running the userspace test"
+"$TEST"
+rc=$?
+say "test exited $rc"
+write_result test-done "" "$rc"
+poweroff -f
+
+echo b >/proc/sysrq-trigger 2>/dev/null
+while true; do
+	sleep 1
+done
