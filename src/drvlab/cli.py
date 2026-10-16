@@ -170,14 +170,31 @@ def _run(args: argparse.Namespace) -> int:
         console_log=run.console_log,
     )
     code, guest = runner.execute(run, qemu_spec, timeout=args.timeout)
-    _report(run, guest, code)
+    _report(run, guest, code, module_name)
     return code
 
 
-def _report(run: runner.Run, guest: object, code: int) -> None:
-    """Print what happened, in the order that makes a failure readable."""
+def _report(run: runner.Run, guest: object, code: int, module: str | None) -> None:
+    """Print what happened, in the order that makes a failure readable.
+
+    On success the narration is enough. On failure the question is why, and the
+    answer is in what the test printed and in what the kernel said about the
+    module -- neither of which survives if the harness reports only an exit code.
+    """
     for line in runner.guest_lines(run):
         print(f"    {line}")
+
+    if code != errors.EXIT_OK:
+        printed = runner.test_output(run)
+        if printed:
+            print("    -- the test printed --")
+            for line in printed:
+                print(f"    | {line}")
+        kernel = runner.relevant_kernel_lines(run, module)
+        if kernel:
+            print("    -- from the kernel log --")
+            for line in kernel:
+                print(f"    | {line}")
 
     if code == errors.EXIT_OK:
         print("==> PASS")

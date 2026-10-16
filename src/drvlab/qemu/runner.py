@@ -8,6 +8,7 @@ files and waiting.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -121,3 +122,55 @@ def guest_lines(run: Run) -> list[str]:
     first-person account of where a run got to.
     """
     return [line for line in console_text(run).splitlines() if line.startswith("drvlab:")]
+
+
+#: Kernel message lines carry a `[  seconds]` stamp; userspace output does not.
+_KERNEL_LINE = re.compile(r"^\[\s*\d+\.\d+\]")
+
+#: Substrings that make a kernel line worth showing when a run fails.
+_TROUBLE = (
+    "Call Trace",
+    "BUG:",
+    "WARNING:",
+    "error",
+    "Error",
+    "failed",
+    "Failed",
+    "denied",
+    "Unable to",
+    "taint",
+)
+
+
+def test_output(run: Run) -> list[str]:
+    """What the driver's userspace test printed.
+
+    Identified by elimination: the kernel's own lines are stamped, and /init
+    prefixes its narration with "drvlab:", so an unstamped line that is neither
+    came out of the test program. That makes it the only account of why a test
+    failed, and it is lost if the harness only reports an exit code.
+    """
+    return [
+        line
+        for line in console_text(run).splitlines()
+        if line.strip()
+        and not line.startswith("drvlab:")
+        and not _KERNEL_LINE.match(line)
+    ]
+
+
+def relevant_kernel_lines(run: Run, module: str | None, *, limit: int = 15) -> list[str]:
+    """Kernel lines worth showing when a run fails.
+
+    Filtered rather than dumped: a boot log is mostly drivers for hardware the
+    guest does not have. What survives is anything mentioning the module under
+    test and anything that looks like trouble.
+    """
+    chosen: list[str] = []
+    for line in console_text(run).splitlines():
+        if not _KERNEL_LINE.match(line):
+            continue
+        if (module and module in line) or any(marker in line for marker in _TROUBLE):
+            if line not in chosen:
+                chosen.append(line)
+    return chosen[-limit:]
